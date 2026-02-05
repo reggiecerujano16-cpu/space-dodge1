@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Space Dodge: Overdrive</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4cc9f0">
+
+<style>
+* { box-sizing: border-box; font-family: system-ui, sans-serif; }
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #120458, #000);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  color: white;
+}
+canvas {
+  background: linear-gradient(#050816, #000);
+  border-radius: 16px;
+  box-shadow: 0 0 40px #4cc9f055;
+}
+.menu {
+  position: absolute;
+  text-align: center;
+}
+button {
+  padding: 12px 24px;
+  font-size: 18px;
+  border: none;
+  border-radius: 8px;
+  background: #4cc9f0;
+  cursor: pointer;
+  margin: 8px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game" width="420" height="600"></canvas>
+
+<div id="pauseMenu" class="menu" style="display:none">
+  <h1>Paused</h1>
+  <button onclick="togglePause()">Resume</button>
+  <button onclick="location.reload()">Restart</button>
+</div>
+
+<script>
+/* ---------- PWA ---------- */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+
+/* ---------- GAME CORE ---------- */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const pauseMenu = document.getElementById("pauseMenu");
+
+let paused = false;
+let gameOver = false;
+let level = 1;
+let score = 0;
+
+const keys = {};
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") togglePause();
+  keys[e.key.toLowerCase()] = true;
+});
+document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+/* ---------- PLAYER ---------- */
+const player = {
+  x: 190, y: 520, w: 40, h: 40,
+  speed: 6,
+  cooldown: 0
+};
+
+const lasers = [];
+const asteroids = [];
+const particles = [];
+let boss = null;
+
+/* ---------- HELPERS ---------- */
+function rectHit(a,b){
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+function explode(x,y,color="#f72585"){
+  for(let i=0;i<20;i++){
+    particles.push({
+      x,y,
+      vx:(Math.random()-0.5)*4,
+      vy:(Math.random()-0.5)*4,
+      life:30,
+      color
+    });
+  }
+}
+
+/* ---------- SPAWN ---------- */
+function spawnAsteroid(){
+  asteroids.push({
+    x: Math.random()*380,
+    y: -40,
+    w: 30, h: 30,
+    speed: 2 + level*0.3
+  });
+}
+
+function spawnBoss(){
+  boss = {
+    x: 110, y: 40,
+    w: 200, h: 60,
+    hp: 50 + level*20,
+    dir: 1
+  };
+}
+
+/* ---------- UPDATE ---------- */
+function update(){
+  if (paused || gameOver) return;
+
+  score += 0.05;
+
+  if ((keys["arrowleft"]||keys["a"]) && player.x>0) player.x-=player.speed;
+  if ((keys["arrowright"]||keys["d"]) && player.x<380) player.x+=player.speed;
+
+  if ((keys[" "]||keys["enter"]) && player.cooldown<=0){
+    lasers.push({x:player.x+18,y:player.y,w:4,h:14});
+    player.cooldown=15;
+  }
+  if (player.cooldown>0) player.cooldown--;
+
+  if (!boss && Math.random()<0.03) spawnAsteroid();
+
+  asteroids.forEach(a=>a.y+=a.speed);
+  lasers.forEach(l=>l.y-=8);
+
+  /* collisions */
+  asteroids.forEach((a,i)=>{
+    lasers.forEach((l,j)=>{
+      if(rectHit(l,a)){
+        explode(a.x,a.y);
+        asteroids.splice(i,1);
+        lasers.splice(j,1);
+      }
+    });
+    if(rectHit(a,player)) gameOver=true;
+  });
+
+  /* boss */
+  if(level%5===0 && !boss) spawnBoss();
+  if(boss){
+    boss.x += boss.dir*2;
+    if(boss.x<0||boss.x>220) boss.dir*=-1;
+
+    lasers.forEach((l,j)=>{
+      if(rectHit(l,boss)){
+        boss.hp--;
+        lasers.splice(j,1);
+        explode(l.x,l.y,"#ffd166");
+        if(boss.hp<=0){
+          explode(boss.x+100,boss.y+30,"#80ffdb");
+          boss=null;
+          level++;
+        }
+      }
+    });
+  }
+
+  /* particles */
+  particles.forEach(p=>{
+    p.x+=p.vx; p.y+=p.vy; p.life--;
+  });
+}
+
+/* ---------- DRAW ---------- */
+function draw(){
+  ctx.clearRect(0,0,420,600);
+
+  // player
+  ctx.fillStyle="#4cc9f0";
+  ctx.beginPath();
+  ctx.moveTo(player.x+20,player.y);
+  ctx.lineTo(player.x,player.y+40);
+  ctx.lineTo(player.x+40,player.y+40);
+  ctx.fill();
+
+  // lasers
+  ctx.fillStyle="#80ffdb";
+  lasers.forEach(l=>ctx.fillRect(l.x,l.y,l.w,l.h));
+
+  // asteroids
+  ctx.fillStyle="#f72585";
+  asteroids.forEach(a=>ctx.fillRect(a.x,a.y,a.w,a.h));
+
+  // boss
+  if(boss){
+    ctx.fillStyle="#ffd166";
+    ctx.fillRect(boss.x,boss.y,boss.w,boss.h);
+    ctx.fillStyle="red";
+    ctx.fillRect(boss.x,boss.y-8,boss.w*(boss.hp/(50+level*20)),4);
+  }
+
+  // particles
+  particles.forEach(p=>{
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y,3,3);
+  });
+
+  // UI
+  ctx.fillStyle="white";
+  ctx.fillText(`Score: ${Math.floor(score)}`,10,20);
+  ctx.fillText(`Level: ${level}`,10,40);
+
+  if(gameOver){
+    ctx.fillStyle="rgba(0,0,0,.7)";
+    ctx.fillRect(0,0,420,600);
+    ctx.fillStyle="white";
+    ctx.font="32px system-ui";
+    ctx.fillText("Game Over",110,300);
+  }
+}
+
+/* ---------- LOOP ---------- */
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+/* ---------- PAUSE ---------- */
+function togglePause(){
+  paused=!paused;
+  pauseMenu.style.display = paused ? "block":"none";
+}
+</script>
+</body>
+</html>
